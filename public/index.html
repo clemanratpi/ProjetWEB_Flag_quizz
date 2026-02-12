@@ -1,0 +1,65 @@
+<!doctype html>
+<html lang="fr">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Flag Quiz</title>
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <main class="container">
+
+    <header class="top">
+      <h1>🌍 Flag Quiz</h1>
+      <div id="me" class="me"></div>
+    </header>
+
+    <section class="card" id="authCard">
+      <h2>Connexion</h2>
+      <div class="row">
+        <input id="username" placeholder="Pseudo" autocomplete="username">
+        <input id="password" placeholder="Mot de passe" type="password" autocomplete="current-password">
+      </div>
+      <div class="row">
+        <button id="btnLogin">Se connecter</button>
+        <button id="btnRegister" class="secondary">Créer un compte</button>
+        <button id="btnLogout" class="danger hidden">Déconnexion</button>
+      </div>
+      <p id="authMsg" class="msg"></p>
+    </section>
+
+    <section class="card hidden" id="gameCard">
+      <div class="gameTop">
+        <h2>Partie</h2>
+        <div class="score">Score : <span id="score">0</span></div>
+      </div>
+
+      <div class="flagWrap">
+        <img id="flag" alt="Drapeau" />
+      </div>
+
+      <div class="row">
+        <input id="answer" placeholder="Tape le pays (FR ou EN)" />
+        <button id="btnGuess">Valider</button>
+      </div>
+
+      <div class="row">
+        <button id="btnStart" class="secondary">Lancer une partie</button>
+        <button id="btnEnd" class="danger">Abandonner</button>
+      </div>
+
+      <p id="gameMsg" class="msg"></p>
+    </section>
+
+    <section class="card hidden" id="statsCard">
+      <h2>Stats</h2>
+      <p>Meilleur score : <strong id="best">0</strong></p>
+      <h3>10 dernières parties</h3>
+      <ul id="history"></ul>
+    </section>
+
+  </main>
+
+  <script src="app.js"></script>
+</body>
+</html>

@@ -1,0 +1,36 @@
+-- USERS
+CREATE TABLE IF NOT EXISTS users (
+  id SERIAL PRIMARY KEY,
+  username VARCHAR(40) UNIQUE NOT NULL,
+  password_hash TEXT NOT NULL,
+  created_at TIMESTAMP NOT NULL DEFAULT NOW()
+);
+
+-- COUNTRIES
+CREATE TABLE IF NOT EXISTS countries (
+  id SERIAL PRIMARY KEY,
+  name_fr TEXT NOT NULL,
+  name_en TEXT NOT NULL,
+  iso2 CHAR(2) UNIQUE NOT NULL,
+  iso3 CHAR(3) UNIQUE NOT NULL,
+  flag_url TEXT NOT NULL
+);
+
+-- GAMES
+CREATE TABLE IF NOT EXISTS games (
+  id SERIAL PRIMARY KEY,
+  user_id INT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  score INT NOT NULL DEFAULT 0,
+  started_at TIMESTAMP NOT NULL DEFAULT NOW(),
+  ended_at TIMESTAMP NULL
+);
+
+-- GUESSES (historique des réponses)
+CREATE TABLE IF NOT EXISTS guesses (
+  id SERIAL PRIMARY KEY,
+  game_id INT NOT NULL REFERENCES games(id) ON DELETE CASCADE,
+  country_id INT NOT NULL REFERENCES countries(id),
+  user_answer TEXT NOT NULL,
+  is_correct BOOLEAN NOT NULL,
+  created_at TIMESTAMP NOT NULL DEFAULT NOW()
+);
