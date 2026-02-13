@@ -13,15 +13,19 @@ const bestEl = $("best");
 const historyEl = $("history");
 
 const flagImg = $("flag");
-let currentCountryId = null;
+const livesEl = $("lives");
 
-function normalize($str) {
-    $str = trim($str);
-    $str = mb_strtolower($str, 'UTF-8');
-    $str = iconv('UTF-8', 'ASCII//TRANSLIT', $str); // enlève accents
-    $str = preg_replace('/[^a-z ]/', '', $str);    // enlève caractères spéciaux
-    $str = preg_replace('/\s+/', ' ', $str);       // espaces multiples
-    return $str;
+let currentCountryId = null;
+let gameActive = false;
+
+function renderLives(lives) {
+  const n = Math.max(0, Number(lives ?? 0));
+  if (livesEl) livesEl.textContent = "❤️".repeat(n) + "🖤".repeat(3 - n);
+}
+
+function setGuessEnabled(enabled) {
+  $("btnGuess").disabled = !enabled;
+  $("answer").disabled = !enabled;
 }
 
 async function api(path, method = "GET", body = null) {
@@ -35,8 +39,21 @@ async function api(path, method = "GET", body = null) {
   return { ok: res.ok, status: res.status, data };
 }
 
+// 🔥 Chemins absolus (évite les bugs ../api)
+const API = {
+  me: "/projet-web/api/auth.php?action=me",
+  login: "/projet-web/api/auth.php?action=login",
+  register: "/projet-web/api/auth.php?action=register",
+  logout: "/projet-web/api/auth.php?action=logout",
+  stats: "/projet-web/api/stats.php",
+  start: "/projet-web/api/game.php?action=start",
+  next: "/projet-web/api/game.php?action=next",
+  guess: "/projet-web/api/game.php?action=guess",
+  end: "/projet-web/api/game.php?action=end",
+};
+
 async function refreshMe() {
-  const r = await api("../api/auth.php?action=me");
+  const r = await api(API.me);
   if (r.ok && r.data.ok && r.data.user) {
     me.textContent = `Connecté : ${r.data.user.username}`;
     $("btnLogout").classList.remove("hidden");
@@ -52,11 +69,12 @@ async function refreshMe() {
 }
 
 async function refreshStats() {
-  const r = await api("../api/stats.php");
+  const r = await api(API.stats);
   if (!r.ok) return;
+
   bestEl.textContent = r.data.best ?? 0;
   historyEl.innerHTML = "";
-  (r.data.history || []).forEach(g => {
+  (r.data.history || []).forEach((g) => {
     const li = document.createElement("li");
     const ended = g.ended_at ? "terminée" : "en cours";
     li.textContent = `Score ${g.score} — ${ended} — ${g.started_at}`;
@@ -66,61 +84,101 @@ async function refreshStats() {
 
 async function startGame() {
   gameMsg.textContent = "";
-  const r = await api("../api/game.php?action=start", "POST");
-  if (!r.ok) {
+  setGuessEnabled(false);
+  currentCountryId = null;
+
+  const r = await api(API.start, "POST");
+  if (!r.ok || !r.data.ok) {
     gameMsg.textContent = r.data.error || "Erreur start";
     return;
   }
-  scoreEl.textContent = "0";
+
+  gameActive = true;
+  scoreEl.textContent = String(r.data.score ?? 0);
+  renderLives(r.data.lives ?? 3);
+
   await nextCountry();
 }
 
 async function nextCountry() {
-  const r = await api("../api/game.php?action=next");
-  if (!r.ok) {
+  if (!gameActive) return;
+
+  const r = await api(API.next);
+  if (!r.ok || !r.data.ok) {
     gameMsg.textContent = r.data.error || "Erreur next";
     return;
   }
+
+  renderLives(r.data.lives ?? 3);
+
   if (r.data.done) {
     gameMsg.textContent = "Plus de pays disponibles 😅";
+    setGuessEnabled(false);
     return;
   }
+
   currentCountryId = r.data.country_id;
   flagImg.src = r.data.flag_url;
+
   scoreEl.textContent = String(r.data.score ?? 0);
   $("answer").value = "";
   $("answer").focus();
+  setGuessEnabled(true);
 }
 
 async function guess() {
+  if (!gameActive) return;
+
   const answer = $("answer").value.trim();
   if (!currentCountryId) return;
 
-  const r = await api("../api/game.php?action=guess", "POST", {
+  // (option) éviter double-clic spam
+  setGuessEnabled(false);
+
+  const r = await api(API.guess, "POST", {
     country_id: currentCountryId,
-    answer
+    answer,
   });
 
-  if (!r.ok) {
-    gameMsg.textContent = r.data.error || "Erreur guess";
+  if (!r.ok || !r.data.ok) {
+    gameMsg.textContent = r.data.error || `Erreur guess (HTTP ${r.status})`;
+    setGuessEnabled(true);
     return;
   }
 
+  renderLives(r.data.lives ?? 0);
+
+  const fr = r.data?.expected?.fr ?? "?";
+  const en = r.data?.expected?.en ?? "?";
+
   if (r.data.correct) {
-    gameMsg.textContent = `✅ Correct ! (${r.data.expected.fr})`;
-    scoreEl.textContent = String(r.data.score);
+    gameMsg.textContent = `✅ Correct ! (${fr})`;
+    scoreEl.textContent = String(r.data.score ?? 0);
+    await refreshStats();
     await nextCountry();
-    await refreshStats();
-  } else {
-    gameMsg.textContent = `❌ Faux. C'était : ${r.data.expected.fr} / ${r.data.expected.en}. Score final: ${r.data.score}`;
-    currentCountryId = null;
-    await refreshStats();
+    return;
   }
+
+  // Mauvaise réponse
+  if (r.data.game_over) {
+    gameMsg.textContent = `💀 Game Over ! C’était : ${fr} / ${en}. Score final: ${r.data.score ?? 0}`;
+    currentCountryId = null;
+    gameActive = false;
+    await refreshStats();
+    setGuessEnabled(false);
+    return;
+  }
+
+  gameMsg.textContent = `❌ Faux ! C’était : ${fr} / ${en}. Il te reste ${r.data.lives} vie(s).`;
+  await refreshStats();
+  await nextCountry();
 }
 
 async function endGame() {
-  await api("../api/game.php?action=end", "POST");
+  await api(API.end, "POST");
   currentCountryId = null;
+  gameActive = false;
+  setGuessEnabled(false);
   gameMsg.textContent = "Partie arrêtée.";
   await refreshStats();
 }
@@ -130,7 +188,7 @@ $("btnLogin").addEventListener("click", async () => {
   const username = $("username").value.trim();
   const password = $("password").value;
 
-  const r = await api("../api/auth.php?action=login", "POST", { username, password });
+  const r = await api(API.login, "POST", { username, password });
   if (!r.ok || !r.data.ok) {
     authMsg.textContent = r.data.error || "Erreur login";
     return;
@@ -144,7 +202,7 @@ $("btnRegister").addEventListener("click", async () => {
   const username = $("username").value.trim();
   const password = $("password").value;
 
-  const r = await api("../api/auth.php?action=register", "POST", { username, password });
+  const r = await api(API.register, "POST", { username, password });
   if (!r.ok || !r.data.ok) {
     authMsg.textContent = r.data.error || "Erreur register";
     return;
@@ -154,7 +212,7 @@ $("btnRegister").addEventListener("click", async () => {
 });
 
 $("btnLogout").addEventListener("click", async () => {
-  await api("../api/auth.php?action=logout", "POST");
+  await api(API.logout, "POST");
   authMsg.textContent = "Déconnecté.";
   await refreshMe();
 });
@@ -162,8 +220,12 @@ $("btnLogout").addEventListener("click", async () => {
 $("btnStart").addEventListener("click", startGame);
 $("btnGuess").addEventListener("click", guess);
 $("btnEnd").addEventListener("click", endGame);
+
 $("answer").addEventListener("keydown", (e) => {
   if (e.key === "Enter") guess();
 });
 
+// état initial
+setGuessEnabled(false);
+renderLives(0);
 refreshMe();

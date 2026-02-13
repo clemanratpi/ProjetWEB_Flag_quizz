@@ -38,7 +38,6 @@ function normalize($s) {
 }
 
 $action = $_GET["action"] ?? "";
-
 require_login();
 
 /* -------------------- START -------------------- */
@@ -49,10 +48,11 @@ if ($action === "start") {
 
   $_SESSION["game_id"] = $gameId;
   $_SESSION["score"] = 0;
+  $_SESSION["lives"] = 3;
   $_SESSION["used_country_ids"] = [];
   unset($_SESSION["current_country_id"]);
 
-  json_response(["ok" => true, "game_id" => $gameId, "score" => 0]);
+  json_response(["ok" => true, "game_id" => $gameId, "score" => 0, "lives" => 3]);
 }
 
 /* -------------------- NEXT -------------------- */
@@ -71,9 +71,11 @@ if ($action === "next") {
       $placeholders[] = $ph;
       $params[$ph] = (int)$id;
     }
-    $sql = "SELECT id, flag_url FROM countries
+    $sql = "SELECT id, flag_url
+            FROM countries
             WHERE id NOT IN (" . implode(",", $placeholders) . ")
-            ORDER BY RANDOM() LIMIT 1";
+            ORDER BY RANDOM()
+            LIMIT 1";
     $stmt = $pdo->prepare($sql);
     $stmt->execute($params);
   } else {
@@ -95,6 +97,7 @@ if ($action === "next") {
     "done" => false,
     "country_id" => $countryId,
     "flag_url" => $flagUrl,
+    "lives" => (int)($_SESSION["lives"] ?? 3),
     "score" => (int)($_SESSION["score"] ?? 0)
   ]);
 }
@@ -119,7 +122,7 @@ if ($action === "guess") {
     json_response(["ok" => false, "error" => "Missing country_id"], 400);
   }
 
-  // Security: ensure the guessed country matches the one served by 'next'
+  // Must guess the country that was served by "next"
   $current = (int)($_SESSION["current_country_id"] ?? 0);
   if ($current <= 0) {
     json_response(["ok" => false, "error" => "No country to guess (call next first)"], 400);
@@ -143,7 +146,7 @@ if ($action === "guess") {
 
   $isCorrect = ($userAnswer !== "" && ($userAnswer === $fr || $userAnswer === $en));
 
-  // Mark country as used (whether correct or not, to avoid repeats)
+  // Mark country as used
   $used = $_SESSION["used_country_ids"] ?? [];
   if (!is_array($used)) $used = [];
   if (!in_array($countryId, $used, true)) {
@@ -151,15 +154,22 @@ if ($action === "guess") {
     $_SESSION["used_country_ids"] = $used;
   }
 
-  // Update score in session + DB if correct
+  // Update score if correct
   if ($isCorrect) {
     $_SESSION["score"] = (int)($_SESSION["score"] ?? 0) + 1;
     $stmt = $pdo->prepare("UPDATE games SET score = :s WHERE id = :g");
     $stmt->execute([":s" => (int)$_SESSION["score"], ":g" => $gameId]);
   }
 
-  // Save guess in DB (if you have the table)
-  // If your schema doesn't have guesses, comment this block.
+  // Lives system
+  $lives = (int)($_SESSION["lives"] ?? 3);
+  if (!$isCorrect) {
+    $lives--;
+    $_SESSION["lives"] = $lives;
+  }
+  $gameOver = ($lives <= 0);
+
+  // Save guess (optional table)
   try {
     $stmt = $pdo->prepare("
       INSERT INTO guesses (game_id, country_id, answer, is_correct)
@@ -172,17 +182,31 @@ if ($action === "guess") {
       ":ok" => $isCorrect
     ]);
   } catch (Exception $e) {
-    // Don't kill the game if guesses table isn't ready
+    // ignore if table doesn't exist
   }
 
-  // After a guess, unset current country to force calling next again
+  // Consume the current question (forces calling next again)
   unset($_SESSION["current_country_id"]);
+
+  // If game over: close game + clear active session
+  if ($gameOver) {
+    $stmt = $pdo->prepare("UPDATE games SET ended_at = NOW() WHERE id = :g");
+    $stmt->execute([":g" => $gameId]);
+
+    unset($_SESSION["game_id"]);
+    // on garde score/lives si tu veux les afficher côté front, sinon tu peux aussi les unset
+  }
 
   json_response([
     "ok" => true,
     "correct" => $isCorrect,
     "score" => (int)($_SESSION["score"] ?? 0),
-    "expected" => $country["name_fr"] ?? null
+    "lives" => max(0, (int)($_SESSION["lives"] ?? 0)),
+    "game_over" => $gameOver,
+    "expected" => [
+      "fr" => $country["name_fr"] ?? null,
+      "en" => $country["name_en"] ?? null
+    ]
   ]);
 }
 
@@ -193,7 +217,15 @@ if ($action === "end") {
     $stmt = $pdo->prepare("UPDATE games SET ended_at = NOW() WHERE id = :g");
     $stmt->execute([":g" => $gameId]);
   }
-  unset($_SESSION["current_country_id"], $_SESSION["game_id"], $_SESSION["score"], $_SESSION["used_country_ids"]);
+
+  unset(
+    $_SESSION["current_country_id"],
+    $_SESSION["game_id"],
+    $_SESSION["score"],
+    $_SESSION["lives"],
+    $_SESSION["used_country_ids"]
+  );
+
   json_response(["ok" => true]);
 }
 
